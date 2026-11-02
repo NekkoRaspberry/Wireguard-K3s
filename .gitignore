@@ -1,0 +1,8 @@
+# Never commit passwords or keys
+.env
+*.env
+*.pem
+*.key
+
+# Peer configs contain private keys
+*.conf

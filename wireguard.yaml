@@ -1,0 +1,120 @@
+# WireGuard for K3s: namespace, VPN port, storage and the VPN server itself
+# Apply with: kubectl apply -f wireguard.yaml
+
+# Separate namespace for the VPN
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vpn
+---
+# VPN port on the Pi's address (<PI_IP>:51820/UDP).
+# To use it from outside, forward UDP 51820 on the router to <PI_IP>.
+apiVersion: v1
+kind: Service
+metadata:
+  name: wireguard
+  namespace: vpn
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Local
+  selector:
+    app: wireguard
+  ports:
+    - name: wireguard
+      port: 51820
+      targetPort: 51820
+      protocol: UDP
+---
+# Server key and one config per peer (device), kept when WireGuard restarts
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: wireguard-config
+  namespace: vpn
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 100Mi
+---
+# One WireGuard server. Each device (peer) gets its own key and address.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wireguard
+  namespace: vpn
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate   # stop the old pod before starting the new one (storage can only be used by one)
+  selector:
+    matchLabels:
+      app: wireguard
+  template:
+    metadata:
+      labels:
+        app: wireguard
+    spec:
+      containers:
+        - name: wireguard
+          # LinuxServer.io image, supports ARM64
+          image: lscr.io/linuxserver/wireguard:1.0.20260223-r0-ls129
+          env:
+            - name: TZ
+              value: Europe/Lisbon
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
+            # Public address of the home network. "auto" = detected at start.
+            # With a changing home IP, use a dynamic DNS name instead.
+            - name: SERVERURL
+              value: auto
+            - name: SERVERPORT
+              value: "51820"
+            # One peer per device (managed by new-peer.sh, ConfigMap wireguard-peers)
+            - name: PEERS
+              valueFrom: { configMapKeyRef: { name: wireguard-peers, key: peers } }
+            - name: INTERNAL_SUBNET
+              value: 10.13.13.0
+            # Devices use Pi-hole for DNS (ads blocked everywhere)
+            - name: PEERDNS
+              value: 10.43.0.53
+            # Only home traffic goes through the VPN: home network, VPN, Pi-hole
+            - name: ALLOWEDIPS
+              value: "<HOME_NETWORK>, 10.13.13.0/24, 10.43.0.53/32"
+            # Never print peer keys or QR codes to the logs
+            - name: LOG_CONFS
+              value: "false"
+          ports:
+            - containerPort: 51820
+              name: wireguard
+              protocol: UDP
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          # Ready when the VPN interface is up
+          readinessProbe:
+            exec:
+              command: ["wg", "show", "wg0", "listen-port"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["wg", "show", "wg0", "listen-port"]
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          securityContext:
+            capabilities:
+              add: ["NET_ADMIN"]   # needed to create the VPN interface (not privileged)
+          volumeMounts:
+            - name: config
+              mountPath: /config
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: wireguard-config
