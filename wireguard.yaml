@@ -7,8 +7,8 @@ kind: Namespace
 metadata:
   name: vpn
 ---
-# VPN port on the Pi's address (<PI_IP>:51820/UDP).
-# To use it from outside, forward UDP 51820 on the router to <PI_IP>.
+# VPN port on the Pi's address (port 51820/UDP).
+# To use it from outside, forward UDP 51820 on the router to the Pi.
 apiVersion: v1
 kind: Service
 metadata:
@@ -82,8 +82,11 @@ spec:
             - name: PEERDNS
               value: 10.43.0.53
             # Only home traffic goes through the VPN: home network, VPN, Pi-hole
+            # (ConfigMap home-network, created at install: no address in this file)
+            - name: HOME_NETWORK
+              valueFrom: { configMapKeyRef: { name: home-network, key: range } }
             - name: ALLOWEDIPS
-              value: "<HOME_NETWORK>, 10.13.13.0/24, 10.43.0.53/32"
+              value: "$(HOME_NETWORK), 10.13.13.0/24, 10.43.0.53/32"
             # Never print peer keys or QR codes to the logs
             - name: LOG_CONFS
               value: "false"

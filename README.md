@@ -15,7 +15,10 @@ One WireGuard VPN server on K3s for secure access to the home network from anywh
 | Storage | 100 Mi, `local-path` (server key and peer configs) |
 | Memory limit | 128 Mi |
 | Peer list | ConfigMap `wireguard-peers` (managed by the scripts) |
+| Home network range | ConfigMap `home-network` (created at install, not in git) |
 | Permissions | `NET_ADMIN` only (not privileged) |
+
+> `<PI_IP>` is the Pi's address on your home network (`hostname -I`, first value). `<HOME_NETWORK>` is its range (e.g. `x.x.x.0/24`), `<ROUTER_IP>` the router's address.
 
 ## Files
 
@@ -34,6 +37,9 @@ Install Pihole-K3s first (devices use it for DNS).
 ```bash
 export KUBECONFIG=~/.kube/config
 kubectl create namespace vpn
+# The home network range, kept on the Pi only (sent through the VPN)
+kubectl create configmap home-network -n vpn \
+  --from-literal=range="$(ip -o -4 route show dev eth0 scope link | awk '{print $1}')"
 # First device. WireGuard needs at least one peer (with none it is not a server).
 kubectl create configmap wireguard-peers -n vpn --from-literal=peers=phone
 kubectl apply -f wireguard.yaml
